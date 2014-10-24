@@ -1,0 +1,81 @@
+#! /usr/bin/env ruby
+
+require 'optparse'
+
+mp4   = []
+other = []
+dry_run = false
+verbose = false
+execute = false
+output  = Dir.pwd
+
+parser = OptionParser.new do |o|
+  o.banner = 'Usage: plexible [options]'
+
+  o.on('--dry-run', 'Shows what the code will do') do
+    dry_run = true
+  end
+
+  o.on('--run', 'Executes the code') do
+    execute = true
+  end
+
+  o.on('--output [directory]', 'The directory to save to') do | directory |
+    unless Dir.exists?(directory)
+      puts "Output directory not found"
+      exit
+    end
+    output = directory
+  end
+
+  o.on('--verbose', 'Enables verbose output') do
+    verbose = true
+  end
+
+  o.on_tail('--help', 'Shows this message') do
+    puts o
+    exit
+  end
+end
+
+parser.parse! ARGV
+
+Dir['**/*'].each do |f|
+  if %w(.mp4 .m4v).include? File.extname(f)
+    mp4 << f
+  elsif Dir.exists? f
+    # do nothing for now
+  elsif %w(.mkv .avi).include? File.extname(f)
+    other << f
+  end
+end
+
+if dry_run || verbose
+  puts "To Move\n"
+  puts mp4 if mp4.count > 0
+  puts "None" if mp4.count == 0
+
+  puts "\n\nTo Process\n"
+  puts other
+end
+
+puts "\n\nProcessing...\n"
+
+mp4.each do |f|
+  cmd = "filebot -rename \"#{ f.gsub('"', '\\"') }\" --db thetvdb --format '{n}/{\"Season ${s.pad(2)}\"}/{n} {s00e00} - {t}' -non-strict"
+  if output
+    cmd += " --output \"#{ output.gsub('"', '\\"') }\""
+  end
+
+  if dry_run
+    puts "#{ cmd }\n"
+  elsif execute
+    if verbose
+      puts `#{ cmd }`
+    else
+      `#{ cmd }`
+    end
+  end
+end
+
+puts "\nCompleted"
