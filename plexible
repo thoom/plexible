@@ -1,6 +1,8 @@
 #! /usr/bin/env ruby
 
+require 'fileutils'
 require 'optparse'
+require 'streamio-ffmpeg'
 
 mp4   = []
 other = []
@@ -8,6 +10,26 @@ dry_run = false
 verbose = false
 execute = false
 output  = Dir.pwd
+
+def cmd_builder(file, output)
+  cmd = "filebot -rename \"#{ file.gsub('"', '\\"') }\" --db thetvdb --format '{n}/{\"Season ${s.pad(2)}\"}/{n} {s00e00} - {t}' -non-strict"
+  if output
+    cmd += " --output \"#{ output.gsub('"', '\\"') }\""
+  end
+end
+
+def move_file(file, output, dry_run, execute, verbose)
+  cmd = cmd_builder(file, output)
+  if dry_run
+    puts "#{ cmd }\n"
+  elsif execute
+    if verbose
+      puts `#{ cmd }`
+    else
+      `#{ cmd }`
+    end
+  end
+end
 
 parser = OptionParser.new do |o|
   o.banner = 'Usage: plexible [options]'
@@ -46,7 +68,7 @@ Dir['**/*'].each do |f|
   elsif Dir.exists? f
     # do nothing for now
   elsif %w(.mkv .avi).include? File.extname(f)
-    other << f
+    other << f if File.stat(f).size > 1048576 * 60
   end
 end
 
@@ -59,23 +81,84 @@ if dry_run || verbose
   puts other
 end
 
-puts "\n\nProcessing...\n"
+unless mp4.count == 0
+  puts "\n\nMoving...\n"
+  mp4.each { |f| move_file(f, output, dry_run, execute, verbose) }
+end
 
-mp4.each do |f|
-  cmd = "filebot -rename \"#{ f.gsub('"', '\\"') }\" --db thetvdb --format '{n}/{\"Season ${s.pad(2)}\"}/{n} {s00e00} - {t}' -non-strict"
-  if output
-    cmd += " --output \"#{ output.gsub('"', '\\"') }\""
-  end
+unless other.count == 0
+  puts "\n\nProcessing...\n"
+  other.each do |f|
+    new_file = f + '.mp4'
+    aac_file = f + '.aac'
+    movie = FFMPEG::Movie.new(f)
 
-  if dry_run
-    puts "#{ cmd }\n"
-  elsif execute
-    if verbose
-      puts `#{ cmd }`
+    puts "video: #{ movie.video_codec}\naudio: #{ movie.audio_codec }" if verbose
+
+    video = movie.video_codec
+    audio = movie.audio_codec
+
+    options = {}
+    add_audio = false
+    video_codec = 'copy'
+
+    unless video.include? 'h264'
+      video_codec = 'libx264'
+    end
+
+    if movie.audio_channels > 2
+      aac_stream  = FFMPEG::Movie.new(f)
+      aac_options = {audio_codec: 'libfaac', audio_channels: 2, custom: '-vn'}
+      if execute
+        i = 0
+        aac_stream.transcode(aac_file, aac_options) do |progress|
+          progress = (progress * 100).to_i
+          unless progress == i
+            print '.'      unless progress == 100
+            print "done\n" if progress == 100
+            i = progress
+          end
+        end
+      end
+
+      add_audio = true
+    end
+
+    if add_audio
+      options[:custom] = "-i \"#{ aac_file.gsub('"', '\\"') }\" -map 0:0 -map 0:1 -map 1:0 -c:v #{ video_codec } -c:a copy -c:a copy -bsf:a aac_adtstoasc"
+    elsif audio.include? 'aac'
+      options[:video_codec] = video_codec
     else
-      `#{ cmd }`
+      options[:video_codec] = video_codec
+      options[:audio_codec] = 'libfaac'
+    end
+
+    if verbose
+      puts options
+      puts new_file
+    end
+
+    if execute
+      i = 0
+      movie.transcode(new_file, options) do |progress|
+        progress = (progress * 100).to_i
+        unless progress == i
+          print '.'      unless progress == 100
+          print "done\n" if progress == 100
+          i = progress
+        end
+      end
+
+      # unlink the aac_file and the original
+      if add_audio
+        FileUtils.mv(aac_file, File.expand_path('~/.Trash'))
+      end
+
+      FileUtils.mv(f, File.expand_path('~/.Trash'))
+      move_file(new_file, output, dry_run, execute, verbose)
     end
   end
 end
+
 
 puts "\nCompleted"
