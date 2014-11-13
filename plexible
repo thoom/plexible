@@ -5,7 +5,9 @@ require 'optparse'
 require 'streamio-ffmpeg'
 
 mp4   = []
+srt   = []
 other = []
+
 dry_run = false
 verbose = false
 execute = false
@@ -65,6 +67,8 @@ parser.parse! ARGV
 Dir['**/*'].each do |f|
   if %w(.mp4 .m4v).include? File.extname(f)
     mp4 << f
+  elsif %w(.srt).include? File.extname(f)
+    srt << f
   elsif Dir.exists? f
     # do nothing for now
   elsif %w(.mkv .avi).include? File.extname(f)
@@ -75,16 +79,24 @@ end
 if dry_run || verbose
   puts "To Move\n"
   puts mp4 if mp4.count > 0
-  puts "None" if mp4.count == 0
+  puts srt if srt.count > 0
+  puts "None" if mp4.count == 0 && srt.count == 0
 
   puts "\n\nTo Process\n"
-  puts other
+  puts other if other.count > 0
+  puts "None" if other.count == 0
 end
 
 unless mp4.count == 0
-  puts "\n\nMoving...\n"
+  puts "\n\nMoving movies...\n"
   mp4.each { |f| move_file(f, output, dry_run, execute, verbose) }
 end
+
+unless srt.count == 0
+  puts "\n\nMoving subtitle...\n"
+  srt.each { |f| move_file(f, output, dry_run, execute, verbose) }
+end
+
 
 unless other.count == 0
   puts "\n\nProcessing...\n"
